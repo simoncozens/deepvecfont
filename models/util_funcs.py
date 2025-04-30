@@ -1,6 +1,8 @@
 import torch
 import torch.nn.functional as F
 
+from data_utils.svg_utils import MAX_PATH_COMMANDS
+
 def select_imgs(images_of_onefont, selected_cls, opts):
     # given selected char classes, return selected imgs
     # images_of_onefont: [bs, 52, opts.image_size, opts.image_size]
@@ -17,7 +19,7 @@ def select_seqs(seqs_of_onefont, selected_cls, opts):
     nums = selected_cls.size(1)
     selected_cls_ = selected_cls.unsqueeze(2)
     selected_cls_ = selected_cls_.unsqueeze(3)
-    selected_cls_ = selected_cls_.expand(seqs_of_onefont.size(0), nums, opts.max_seq_len, opts.seq_feature_dim)         
+    selected_cls_ = selected_cls_.expand(seqs_of_onefont.size(0), nums, 1+MAX_PATH_COMMANDS, opts.seq_feature_dim)         
     selected_seqs = torch.gather(seqs_of_onefont, 1, selected_cls_)
     return selected_seqs
 
