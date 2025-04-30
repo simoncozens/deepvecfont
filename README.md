@@ -512,40 +512,14 @@ python train_sr.py --mode train --name image_sr
 Put the ttf/otf files in `./data_utils/font_ttfs/train` and `./data_utils/font_ttfs/test`, and organize them as `0000.ttf`, `0001.ttf`, `0002.ttf`...
 The ttf/otf files in our dataset can be found in [Google Drive](https://drive.google.com/file/d/1D-KxfDqpz1tOSY5VxfsU7o0HlKd0GuJI/view?usp=sharing).
 
-- **Deactivate the conda environment and install Fontforge**
+- **Build database**
 
-for python > 3.0:
-```
-conda deactivate
-apt install python3-fontforge
-```
-It works in Ubuntu 20.04.1, other lower versions may fail in `import fontforge`.
-- **Get SFD files via Fontforge**
 ```
 cd data_utils
-python convert_ttf_to_sfd_mp.py --split train
-python convert_ttf_to_sfd_mp.py --split test
-```
-
-- **Generate glyph images**
-```
-python write_glyph_imgs.py --split train
-python write_glyph_imgs.py --split test
-```
-
-- **package them to dirs or pkl**
-
-dirs (recommended):
-```
 python write_data_to_dirs.py --split train
 python write_data_to_dirs.py --split test
 ```
 
-pkl
-```
-python write_data_to_pkl.py --split train
-python write_data_to_pkl.py --split test
-```
 Note:
 
 (1) If you use the mean and stddev files calculated from your own data, you need to retrain the neural rasterizer. For English fonts, just use the mean and stddev files we provided.
