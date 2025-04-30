@@ -6,6 +6,7 @@ import numpy as np
 import svg_utils
 from PIL import Image, ImageDraw, ImageFont
 from extract_path import extract_path, make_hb_font
+import tqdm
 
 
 def create_db(opts):
@@ -16,12 +17,7 @@ def create_db(opts):
     num_fonts_w = len(str(num_fonts))
     print(f"Number {opts.split} fonts before processing", num_fonts)
 
-    cur_process_log_file = open(
-        os.path.join(opts.log_dir, f"{opts.split}_log.txt"),
-        "w",
-        encoding="utf-8",
-    )
-    for i, font_path in enumerate(all_font_paths):
+    for i, font_path in tqdm.tqdm(enumerate(all_font_paths), total=num_fonts):
         cur_font_glyphs = load_font_glyphs(opts.charset, font_path, opts.img_size)
 
         if cur_font_glyphs is None:
@@ -31,7 +27,7 @@ def create_db(opts):
         try:
             font = ImageFont.truetype(font_path, opts.img_size, encoding="unic")
         except Exception:
-            print("cant open " + font_path)
+            print("cant open " + str(font_path))
             continue
         # use the font whose all glyphs are valid
         # merge the whole font
@@ -40,12 +36,22 @@ def create_db(opts):
         binaryfp = []
         char_class = []
         rendered = []
+        ok = True
         for charid, char in enumerate(opts.charset):
             example = cur_font_glyphs[charid]
             sequence.append(example["sequence"])
             seq_len.append(example["seq_len"])
             char_class.append(example["class"])
-            rendered.append(render_glyph(font, char, opts.img_size))
+            rendering = render_glyph(font, char, opts.img_size)
+            if rendering is None:
+                print("skipping glyph", char)
+                ok = False
+                break
+            binaryfp = example["binary_fp"]
+            rendered.append(rendering)
+        if not ok:
+            print("skipping font (rendering failure)", font_path)
+            continue
         rendered = np.array(rendered)
         output_dir = (
             Path(opts.output_path)
@@ -58,7 +64,7 @@ def create_db(opts):
         np.save(output_dir / "sequence.npy", np.array(sequence))
         np.save(output_dir / "seq_len.npy", np.array(seq_len))
         np.save(output_dir / "class.npy", np.array(char_class))
-        np.save(output_dir / "font_path.npy", np.array(binaryfp))
+        np.save(output_dir / "font_id.npy", np.array(binaryfp))
         np.save(output_dir / f"rendered_{opts.img_size}.npy", rendered)
 
     print(
@@ -72,7 +78,11 @@ def render_glyph(font, char, img_size):
     # Create a blank image with white background
     img = Image.new("L", (img_size, img_size), 255)
     draw = ImageDraw.Draw(img)
-    l, t, r, b = font.getbbox(char)
+    try:
+        l, t, r, b = font.getbbox(char)
+    except Exception:
+        print("cannot get bbox")
+        return
     vbox_w = r - l
     vbox_h = b - t
     aspect_ratio = float(img_size) / max(int(vbox_w), int(vbox_h))
@@ -111,8 +121,8 @@ def render_glyph(font, char, img_size):
 
 
 def load_font_glyphs(charset, font_path, img_size):
-    cur_font_glyphs = []
     font, upem = make_hb_font(font_path)
+    good_paths = []
 
     for char in charset:
         # Extract char as SVG string
@@ -120,17 +130,17 @@ def load_font_glyphs(charset, font_path, img_size):
         pathunibfp = svg, ord(char), font_path
         if not svg_utils.is_valid_path(pathunibfp):
             return None
-        example = svg_utils.create_example(pathunibfp, img_size)
+        good_paths.append(pathunibfp)
 
-        cur_font_glyphs.append(example)
-    return cur_font_glyphs
+    # Now we know the whole font is valid, we can process all glyphs
+    return [svg_utils.create_example(pathunibfp, img_size) for pathunibfp in good_paths]
 
 
 def cal_mean_stddev(opts):
     print("Calculating all glyphs' mean stddev ....")
     font_paths = []
     dir_path = os.path.join(opts.output_path, opts.split)
-    for root, dirs, files in os.walk(dir_path):
+    for _root, dirs, _files in os.walk(dir_path):
         for dir_name in dirs:
             font_paths.append(os.path.join(dir_path, dir_name))
     font_paths.sort()
@@ -138,16 +148,14 @@ def cal_mean_stddev(opts):
     num_chars = len(opts.charset)
     main_stddev_accum = svg_utils.MeanStddev()
     cur_sum_count = main_stddev_accum.create_accumulator()
-    for i in range(0, num_fonts):
+    for i in tqdm.tqdm(range(0, num_fonts)):
         cur_font_path = font_paths[i]
+        seqlens = np.load(os.path.join(cur_font_path, "seq_len.npy")).tolist()
+        sequences = np.load(os.path.join(cur_font_path, "sequence.npy")).tolist()
         for charid in range(num_chars):
             cur_font_char = {}
-            cur_font_char["seq_len"] = np.load(
-                os.path.join(cur_font_path, "seq_len.npy")
-            ).tolist()[charid]
-            cur_font_char["sequence"] = np.load(
-                os.path.join(cur_font_path, "sequence.npy")
-            ).tolist()[charid]
+            cur_font_char["seq_len"] = seqlens[charid]
+            cur_font_char["sequence"] = sequences[charid]
             cur_sum_count = main_stddev_accum.add_input(cur_sum_count, cur_font_char)
 
     output = main_stddev_accum.extract_output(cur_sum_count)
@@ -173,7 +181,6 @@ def main():
         default="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
     )
     parser.add_argument("--ttf_path", type=str, default="font_ttfs")
-    parser.add_argument("--sfd_path", type=str, default="font_sfds")
     parser.add_argument(
         "--output_path",
         type=str,
@@ -194,7 +201,6 @@ def main():
     )
 
     opts = parser.parse_args()
-    assert os.path.exists(opts.sfd_path), "specified sfd glyphs path does not exist"
     split_path = os.path.join(opts.output_path, opts.split)
 
     if not os.path.exists(split_path):
