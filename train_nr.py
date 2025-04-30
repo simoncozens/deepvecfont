@@ -26,8 +26,8 @@ def train_nr_model(opts):
     logfile = open(os.path.join(log_dir, "train_loss_log.txt"), 'w')
     val_logfile = open(os.path.join(log_dir, "val_loss_log.txt"), 'w')
 
-    train_loader = get_loader(opts.data_root, opts.image_size, opts.char_categories, opts.max_seq_len, opts.seq_feature_dim, opts.batch_size, opts.read_mode, opts.mode)
-    val_loader = get_loader(opts.data_root, opts.image_size, opts.char_categories, opts.max_seq_len, opts.seq_feature_dim, opts.batch_size, opts.read_mode, 'test')
+    train_loader = get_loader(opts)
+    val_loader = get_loader(opts, "test")
 
     neural_rasterizer = NeuralRasterizer(img_size=opts.image_size, feature_dim=opts.seq_feature_dim, hidden_size=opts.hidden_size, num_hidden_layers=opts.num_hidden_layers, 
                                          ff_dropout_p=opts.ff_dropout, rec_dropout_p=opts.rec_dropout, input_nc=2 * opts.hidden_size, 

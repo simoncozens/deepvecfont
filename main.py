@@ -33,24 +33,8 @@ def train_main_model(opts):
     logfile = open(os.path.join(log_dir, "train_loss_log.txt"), "w")
     val_logfile = open(os.path.join(log_dir, "val_loss_log.txt"), "w")
 
-    train_loader = get_loader(
-        opts.data_root,
-        opts.image_size,
-        opts.char_categories,
-        opts.seq_feature_dim,
-        opts.batch_size,
-        opts.read_mode,
-        opts.mode,
-    )
-    val_loader = get_loader(
-        opts.data_root,
-        opts.image_size,
-        opts.char_categories,
-        opts.seq_feature_dim,
-        opts.batch_size,
-        opts.read_mode,
-        "test",
-    )
+    train_loader = get_loader(opts)
+    val_loader = get_loader(opts, "test")
 
     img_encoder = ImageEncoder(
         img_size=opts.image_size,
@@ -175,10 +159,8 @@ def train_main_model(opts):
     if opts.tboard:
         writer = SummaryWriter(log_dir)
 
-    mean = np.load(os.path.join(opts.data_root, opts.mode, "mean.npz"))
-    std = np.load(os.path.join(opts.data_root, opts.mode, "stdev.npz"))
-    mean = torch.from_numpy(mean).to(torch.float32).to(device)
-    std = torch.from_numpy(std).to(torch.float32).to(device)
+    mean, std = load_mean_stddev(opts, device)
+
     network_modules = [
         img_encoder,
         img_decoder,

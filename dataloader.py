@@ -100,15 +100,13 @@ class SVGDatasetPickle(SVGDataset):
         return len(self.all_fonts)
 
 
-def get_loader(
-    root_path,
-    img_size,
-    char_num,
-    seq_feature_dim,
-    batch_size,
-    read_mode,
-    mode="train",
-):
+def get_loader(opts, mode="train"):
+    root_path = opts.data_root
+    img_size = opts.image_size
+    char_num = opts.char_categories
+    seq_feature_dim = opts.seq_feature_dim
+    batch_size = opts.batch_size
+    read_mode = opts.read_mode
     # SetRange = T.Lambda(lambda X: 2 * X - 1.)  # convert [0, 1] -> [-1, 1]
     SetRange = T.Lambda(lambda X: 1.0 - X)  # convert [0, 1] -> [0, 1]
     transform = T.Compose([SetRange])
