@@ -7,6 +7,7 @@ import svg_utils
 from PIL import Image, ImageDraw, ImageFont
 from extract_path import extract_path, make_hb_font
 import tqdm
+from svg_utils import MAX_PATH_COMMANDS
 
 
 def create_db(opts):
@@ -40,6 +41,7 @@ def create_db(opts):
         for charid, char in enumerate(opts.charset):
             example = cur_font_glyphs[charid]
             sequence.append(example["sequence"])
+            assert example["seq_len"][0] <= MAX_PATH_COMMANDS
             seq_len.append(example["seq_len"])
             char_class.append(example["class"])
             rendering = render_glyph(font, char, opts.img_size)
@@ -47,8 +49,8 @@ def create_db(opts):
                 print("skipping glyph", char)
                 ok = False
                 break
-            binaryfp = example["binary_fp"]
             rendered.append(rendering)
+        binaryfp = i
         if not ok:
             print("skipping font (rendering failure)", font_path)
             continue

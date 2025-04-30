@@ -23,7 +23,7 @@ from itertools import zip_longest
 from skimage import draw
 
 
-MAX_PATH_COMMANDS = 120
+MAX_PATH_COMMANDS = 50
 
 SVG_PREFIX_BIG = (
     '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="'

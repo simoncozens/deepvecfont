@@ -18,8 +18,9 @@ from models.svg_encoder import SVGLSTMEncoder
 from models.neural_rasterizer import NeuralRasterizer
 from models import util_funcs
 from options import get_parser_main_model
-from data_utils.svg_utils import render
+from data_utils.svg_utils import render, MAX_PATH_COMMANDS
 
+# device = torch.device("mps")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -81,7 +82,7 @@ def train_main_model(opts):
         char_categories=opts.char_categories,
         bottleneck_bits=opts.bottleneck_bits,
         mode=opts.mode,
-        max_sequence_length=opts.max_seq_len,
+        max_sequence_length=(MAX_PATH_COMMANDS + 1),
         hidden_size=opts.hidden_size,
         num_hidden_layers=opts.num_hidden_layers,
         feature_dim=opts.seq_feature_dim,
@@ -93,7 +94,7 @@ def train_main_model(opts):
         char_categories=opts.char_categories,
         bottleneck_bits=opts.bottleneck_bits,
         mode=opts.mode,
-        max_sequence_length=opts.max_seq_len,
+        max_sequence_length=(MAX_PATH_COMMANDS + 1),
         hidden_size=opts.hidden_size,
         num_hidden_layers=opts.num_hidden_layers,
         feature_dim=opts.seq_feature_dim,
@@ -103,7 +104,7 @@ def train_main_model(opts):
 
     mdn_top_layer = SVGMDNTop(
         num_mixture=opts.num_mixture,
-        seq_len=opts.max_seq_len,
+        seq_len=(MAX_PATH_COMMANDS + 1),
         hidden_size=opts.hidden_size,
         mode=opts.mode,
         mix_temperature=opts.mix_temperature,
@@ -131,7 +132,9 @@ def train_main_model(opts):
         + str(opts.nr_ckpt_num)
         + ".nr.pth"
     )
-    neural_rasterizer.load_state_dict(torch.load(neural_rasterizer_fpath))
+    neural_rasterizer.load_state_dict(
+        torch.load(neural_rasterizer_fpath, map_location=device)
+    )
     neural_rasterizer.eval()
 
     if torch.cuda.is_available() and opts.multi_gpu:
@@ -174,8 +177,8 @@ def train_main_model(opts):
 
     mean = np.load(os.path.join(opts.data_root, opts.mode, "mean.npz"))
     std = np.load(os.path.join(opts.data_root, opts.mode, "stdev.npz"))
-    mean = torch.from_numpy(mean).to(device).to(torch.float32)
-    std = torch.from_numpy(std).to(device).to(torch.float32)
+    mean = torch.from_numpy(mean).to(torch.float32).to(device)
+    std = torch.from_numpy(std).to(torch.float32).to(device)
     network_modules = [
         img_encoder,
         img_decoder,
@@ -240,45 +243,39 @@ def train_main_model(opts):
                 f"synsvg_nr_recloss: {synsvg_nr_out['rec_loss'].item():.6f}"
             )
 
-            if batches_done % 50 == 0:
-                logfile.write(message + "\n")
-                print(message)
-                if opts.tboard:
-                    writer.add_scalar("Loss/loss", loss.item(), batches_done)
-                    writer.add_scalar(
-                        "Loss/img_l1_loss", img_l1loss.item(), batches_done
-                    )
-                    writer.add_scalar(
-                        "Loss/img_kl_loss", opts.kl_beta * kl_loss.item(), batches_done
-                    )
-                    writer.add_scalar(
-                        "Loss/img_perceptual_loss",
-                        opts.pt_c_loss_w * vggpt_loss["pt_c_loss"],
-                        batches_done,
-                    )
-                    writer.add_scalar(
-                        "Loss/cmd_softmax_loss", softmax_xent_loss.item(), batches_done
-                    )
-                    writer.add_scalar(
-                        "Loss/coord_mdn_loss", mdn_loss.item(), batches_done
-                    )
-                    writer.add_scalar(
-                        "Loss/synsvg_nr_rec_loss",
-                        synsvg_nr_out["rec_loss"].item(),
-                        batches_done,
-                    )
-                    writer.add_image("Images/trg_img", trg_img[0], batches_done)
-                    writer.add_image(
-                        "Images/trgsvg_nr_img",
-                        trgsvg_nr_out["gen_imgs"][0],
-                        batches_done,
-                    )
-                    writer.add_image(
-                        "Images/synsvg_nr_img",
-                        synsvg_nr_out["gen_imgs"][0],
-                        batches_done,
-                    )
-                    writer.add_image("Images/output_img", output_img[0], batches_done)
+            print(message)
+            if opts.tboard:
+                writer.add_scalar("Loss/loss", loss.item(), batches_done)
+                writer.add_scalar("Loss/img_l1_loss", img_l1loss.item(), batches_done)
+                writer.add_scalar(
+                    "Loss/img_kl_loss", opts.kl_beta * kl_loss.item(), batches_done
+                )
+                writer.add_scalar(
+                    "Loss/img_perceptual_loss",
+                    opts.pt_c_loss_w * vggpt_loss["pt_c_loss"],
+                    batches_done,
+                )
+                writer.add_scalar(
+                    "Loss/cmd_softmax_loss", softmax_xent_loss.item(), batches_done
+                )
+                writer.add_scalar("Loss/coord_mdn_loss", mdn_loss.item(), batches_done)
+                writer.add_scalar(
+                    "Loss/synsvg_nr_rec_loss",
+                    synsvg_nr_out["rec_loss"].item(),
+                    batches_done,
+                )
+                writer.add_image("Images/trg_img", trg_img[0], batches_done)
+                writer.add_image(
+                    "Images/trgsvg_nr_img",
+                    trgsvg_nr_out["gen_imgs"][0],
+                    batches_done,
+                )
+                writer.add_image(
+                    "Images/synsvg_nr_img",
+                    synsvg_nr_out["gen_imgs"][0],
+                    batches_done,
+                )
+                writer.add_image("Images/output_img", output_img[0], batches_done)
 
             if opts.sample_freq > 0 and batches_done % opts.sample_freq == 0:
 
@@ -463,7 +460,7 @@ def network_forward(data, mean, std, opts, network_moudules):
     # randomly select ref vector glyphs
     ref_seq = util_funcs.select_seqs(
         input_sequence, ref_cls, opts
-    )  # [opts.batch_size, opts.ref_nshot, opts.max_seq_len, opts.seq_feature_dim]
+    )  # [opts.batch_size, opts.ref_nshot, (MAX_PATH_COMMANDS+1), opts.seq_feature_dim]
     # randomly select a target vector glyph
     trg_seq = util_funcs.select_seqs(input_sequence, trg_cls, opts)
     trg_seq = trg_seq.squeeze(1)
@@ -480,10 +477,10 @@ def network_forward(data, mean, std, opts, network_moudules):
     # run the svg encoder
     ref_seq_cat = ref_seq.view(
         ref_seq.size(0) * ref_seq.size(1), ref_seq.size(2), ref_seq.size(3)
-    )  #  [opts.batch_size * opts.ref_nshot, opts.max_seq_len, opts.seq_feature_dim]
+    )  #  [opts.batch_size * opts.ref_nshot, (MAX_PATH_COMMANDS+1), opts.seq_feature_dim]
     ref_seq_cat = ref_seq_cat.transpose(
         0, 1
-    )  #  [opts.max_seq_len, opts.batch_size * opts.ref_nshot,  opts.seq_feature_dim]
+    )  #  [(MAX_PATH_COMMANDS+1), opts.batch_size * opts.ref_nshot,  opts.seq_feature_dim]
     se_init_state = svg_encoder.init_state_input(
         torch.zeros(ref_seq_cat.size(1), opts.bottleneck_bits).to(device)
     )
@@ -544,7 +541,7 @@ def network_forward(data, mean, std, opts, network_moudules):
     trg_seqlen = util_funcs.select_seqlens(input_seqlen, trg_cls, opts)
     trg_seqlen = trg_seqlen.squeeze()
     svg_losses = mdn_top_layer.svg_loss(
-        top_output, trg_seq, trg_seqlen + 1, opts.max_seq_len
+        top_output, trg_seq, trg_seqlen + 1, (MAX_PATH_COMMANDS + 1)
     )
     sampled_svg = mdn_top_layer.sample(top_output, outputs, opts.mode)
 
