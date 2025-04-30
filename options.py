@@ -1,4 +1,8 @@
 import argparse
+import os
+
+import numpy as np
+import torch
 
 
 def get_parser_main_model():
@@ -161,3 +165,11 @@ def get_parser_main_model():
     )
 
     return parser
+
+
+def load_mean_stddev(opts, device):
+    mean = np.load(os.path.join(opts.data_root, opts.mode, "mean.npz"))
+    std = np.load(os.path.join(opts.data_root, opts.mode, "stdev.npz"))
+    mean = torch.from_numpy(mean).to(torch.float32).to(device)
+    std = torch.from_numpy(std).to(torch.float32).to(device)
+    return mean, std

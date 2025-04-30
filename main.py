@@ -1,27 +1,25 @@
 import os
-import random
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+from tensorboardX import SummaryWriter
 from torch.optim import Adam
 from torchvision.utils import save_image
-from tensorboardX import SummaryWriter
-import numpy as np
+
 from dataloader import get_loader
-from models.image_encoder import ImageEncoder
+from models import util_funcs
 from models.image_decoder import ImageDecoder
+from models.image_encoder import ImageEncoder
 from models.modality_fusion import ModalityFusion
-from models.vgg_perceptual_loss import VGGPerceptualLoss
-from models.vgg_contextual_loss import VGGContextualLoss
+from models.neural_rasterizer import NeuralRasterizer
 from models.svg_decoder import SVGLSTMDecoder, SVGMDNTop
 from models.svg_encoder import SVGLSTMEncoder
-from models.neural_rasterizer import NeuralRasterizer
-from models import util_funcs
-from options import get_parser_main_model
-from data_utils.svg_utils import render, MAX_PATH_COMMANDS
+from models.vgg_perceptual_loss import VGGPerceptualLoss
+from options import get_parser_main_model, load_mean_stddev
+from data_utils.svg_utils import MAX_PATH_COMMANDS
 
-# device = torch.device("mps")
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("mps")
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def train_main_model(opts):
@@ -277,15 +275,15 @@ def train_main_model(opts):
                 val_coord_mdn_loss = 0.0
                 val_synsvg_nr_rec_loss = 0.0
                 with torch.no_grad():
-                    for val_idx, val_data in enumerate(val_loader):
+                    for val_data in val_loader:
                         (
                             val_img_decoder_out,
                             val_vggpt_loss,
-                            val_kl_loss,
+                            _val_kl_loss,
                             val_svg_losses,
-                            val_trg_img,
-                            val_ref_img,
-                            val_trgsvg_nr_out,
+                            _val_trg_img,
+                            _val_ref_img,
+                            _val_trgsvg_nr_out,
                             val_synsvg_nr_out,
                         ) = network_forward(val_data, mean, std, opts, network_modules)
                         val_img_l1_loss += val_img_decoder_out["img_l1loss"]
@@ -373,7 +371,7 @@ def train_main_model(opts):
     val_logfile.close()
 
 
-def network_forward(data, mean, std, opts, network_moudules):
+def network_forward(data, mean, std, opts, network_modules):
 
     (
         img_encoder,
@@ -384,14 +382,12 @@ def network_forward(data, mean, std, opts, network_moudules):
         svg_decoder,
         mdn_top_layer,
         neural_rasterizer,
-    ) = network_moudules
+    ) = network_modules
 
-    input_image = data["rendered"].to(
-        device
-    )  # bs, opts.char_categories, opts.image_size, opts.image_size
+    input_image = data["rendered"].to(device)
     input_sequence = data["sequence"].to(device)
-    input_clss = data["class"].to(device)  # bs, opts.char_categories, 1
-    input_seqlen = data["seq_len"].to(device)  # bs, opts.char_categories 1
+    input_clss = data["class"].to(device)
+    input_seqlen = data["seq_len"].to(device)
 
     input_sequence = (input_sequence - mean) / std
 
@@ -416,9 +412,6 @@ def network_forward(data, mean, std, opts, network_moudules):
         ref_cls = torch.cat((ref_cls_upper, ref_cls_lower), -1)
 
     # the input reference images
-    trg_cls = torch.randint(0, opts.char_categories, (input_image.size(0), 1)).to(
-        device
-    )  # bs, 1
     ref_cls_multihot = torch.zeros(input_image.size(0), opts.char_categories).to(
         device
     )  # bs, 1
@@ -438,6 +431,9 @@ def network_forward(data, mean, std, opts, network_moudules):
     ref_img = torch.mul(input_image, ref_cls_multihot)
 
     # randomly select a target glyph image
+    trg_cls = torch.randint(0, opts.char_categories, (input_image.size(0), 1)).to(
+        device
+    )
     trg_img = util_funcs.select_imgs(input_image, trg_cls, opts)
     # randomly select ref vector glyphs
     ref_seq = util_funcs.select_seqs(
@@ -449,7 +445,6 @@ def network_forward(data, mean, std, opts, network_moudules):
     # the one-hot target char class
     trg_char = util_funcs.trgcls_to_onehot(input_clss, trg_cls, opts)
     # shirft target sequence
-    gt_trg_seq = trg_seq.clone().detach()
     trg_seq = trg_seq.transpose(0, 1)
     trg_seq_shifted = util_funcs.shift_right(trg_seq)
 
@@ -527,8 +522,8 @@ def network_forward(data, mean, std, opts, network_moudules):
     )
     sampled_svg = mdn_top_layer.sample(top_output, outputs, opts.mode)
 
-    trgsvg_nr_out = neural_rasterizer(trg_seq, trg_char, trg_img)
-    synsvg_nr_out = neural_rasterizer(sampled_svg, trg_char, trg_img)
+    trgsvg_nr_out = neural_rasterizer(trg_seq, trg_img)
+    synsvg_nr_out = neural_rasterizer(sampled_svg, trg_img)
     return (
         img_decoder_out,
         vggpt_loss,
@@ -539,15 +534,6 @@ def network_forward(data, mean, std, opts, network_moudules):
         trgsvg_nr_out,
         synsvg_nr_out,
     )
-
-
-def train(opts):
-    if opts.model_name == "main_model":
-        train_main_model(opts)
-    elif opts.model_name == "others":
-        train_others(opts)
-    else:
-        raise NotImplementedError
 
 
 def main():
@@ -570,7 +556,7 @@ def main():
         with open(os.path.join(experiment_dir, "opts.txt"), "w") as f:
             for key, value in vars(opts).items():
                 f.write(str(key) + ": " + str(value) + "\n")
-        train(opts)
+        train_main_model(opts)
     else:
         raise NotImplementedError
 
